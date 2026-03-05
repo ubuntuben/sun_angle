@@ -72,8 +72,8 @@
   /* Main dial */
   .dial-wrap {
     position: relative; z-index: 1;
-    margin: 24px auto 20px;
-    width: 260px; height: 260px;
+    margin: 24px auto 8px;
+    width: 280px; height: 210px;
   }
 
   .dial-svg { width: 100%; height: 100%; }
@@ -100,11 +100,12 @@
 
   .dial-center {
     position: absolute;
-    inset: 0;
+    bottom: 10px;
+    left: 0; right: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-end;
     gap: 2px;
   }
 
@@ -370,15 +371,25 @@
 <div id="app" style="display:none; width:100%; max-width:360px; display:none; flex-direction:column; align-items:center; gap:0;">
 
   <div class="dial-wrap">
-    <svg class="dial-svg" viewBox="0 0 260 260">
-      <!-- Background track: full 180° arc (sun goes 0→90→0) -->
+    <svg class="dial-svg" viewBox="0 0 260 180">
+      <!-- Background track: upward arc, sunrise left to sunset right -->
       <path class="dial-track" id="trackPath" d="" />
-      <!-- Danger threshold marker at 45° -->
+      <!-- Danger zone fill between the two 45deg points -->
+      <path id="dangerZone" fill="rgba(234,88,12,0.10)" stroke="none" d=""/>
+      <!-- Danger threshold markers at 45deg on each side -->
       <path class="dial-danger-line" id="dangerLine" d="" />
-      <!-- Fill arc -->
+      <!-- Traveled arc fill -->
       <path class="dial-fill" id="dialFill" d="" />
       <!-- Sun dot -->
-      <circle id="sunDot" r="8" fill="#f59e0b" opacity="0"/>
+      <circle id="sunDot" r="9" fill="#f59e0b" opacity="0"/>
+      <circle id="sunDotGlow" r="16" fill="rgba(245,158,11,0.2)" opacity="0"/>
+      <!-- Labels -->
+      <text id="lblSunrise" x="18" y="172" fill="rgba(255,255,255,0.3)" font-size="9" font-family="DM Mono,monospace" text-anchor="middle">RISE</text>
+      <text id="lblSunset"  x="242" y="172" fill="rgba(255,255,255,0.3)" font-size="9" font-family="DM Mono,monospace" text-anchor="middle">SET</text>
+      <text id="lblNoon"    x="130" y="18"  fill="rgba(255,255,255,0.3)" font-size="9" font-family="DM Mono,monospace" text-anchor="middle">NOON</text>
+      <!-- 45deg label -->
+      <text id="lbl45am" x="" y="" fill="rgba(220,80,80,0.7)" font-size="8" font-family="DM Mono,monospace" text-anchor="middle"></text>
+      <text id="lbl45pm" x="" y="" fill="rgba(220,80,80,0.7)" font-size="8" font-family="DM Mono,monospace" text-anchor="middle"></text>
     </svg>
     <div class="dial-center">
       <div class="sun-icon" id="sunIcon">☀</div>
@@ -576,70 +587,108 @@ function arcPath(cx, cy, r, startDeg, endDeg) {
 }
 
 function initDial() {
-  const cx = 130, cy = 130, r = 104;
-  // Track: left horizon at 210deg, solar noon at 270deg (bottom of SVG = arc peak), right horizon at 330deg
-  document.getElementById('trackPath').setAttribute('d', arcPath(cx, cy, r, 210, 330));
+  // Upward semicircle arc in a 260x180 viewBox
+  // Sunrise: left edge (20, 160), Noon: top center (130, 25), Sunset: right edge (240, 160)
+  // This is a semicircle with center at (130, 160), radius 110
+  const cx = 130, cy = 160, r = 110;
 
-  // Danger markers at 45deg altitude
-  // 45/90 * 60deg offset = 30deg from each horizon point
-  // Morning marker: 210 + 30 = 240deg. Afternoon: 270 + 30 = 300deg.
-  function markerPath(deg) {
-    const ox = cx + r * Math.cos(toRad(deg));
-    const oy = cy + r * Math.sin(toRad(deg));
-    const ix = cx + (r - 14) * Math.cos(toRad(deg));
-    const iy = cy + (r - 14) * Math.sin(toRad(deg));
-    return `M ${ox} ${oy} L ${ix} ${iy}`;
+  // Track: from 180deg (left) sweeping UP (counter-clockwise) to 0deg (right)
+  // In SVG: 180deg = left, 0deg = right, arc goes upward through 270deg (top in standard, but SVG y-flips so it's actually the top visually)
+  // We want: start at left (180), go counter-clockwise (through top=270 in math = top visually) to right (0/360)
+  // arcPath uses clockwise sweep. For upward arc: go from 180 to 0 via the TOP, that means large-arc=1, sweep=0 (counter-clockwise)
+  const trackD = `M ${cx - r} ${cy} A ${r} ${r} 0 1 1 ${cx + r} ${cy}`;
+  document.getElementById('trackPath').setAttribute('d', trackD);
+
+  // 45deg markers: at 45deg altitude, sun is 45/90=50% of way from horizon to noon
+  // On the arc, that's at 180-45=135deg (morning) and 45deg (afternoon) from center
+  function ptOnArc(angleDeg) {
+    const rad = toRad(angleDeg);
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
   }
-  document.getElementById('dangerLine').setAttribute('d', markerPath(240) + ' ' + markerPath(300));
+  function ptOnArcInner(angleDeg, inset) {
+    const rad = toRad(angleDeg);
+    return { x: cx + (r-inset) * Math.cos(rad), y: cy + (r-inset) * Math.sin(rad) };
+  }
+
+  // Morning 45deg: 135deg on unit circle. Afternoon 45deg: 45deg.
+  const am45 = ptOnArc(135);
+  const pm45 = ptOnArc(45);
+  const am45i = ptOnArcInner(135, 16);
+  const pm45i = ptOnArcInner(45, 16);
+
+  document.getElementById('dangerLine').setAttribute('d',
+    `M ${am45.x} ${am45.y} L ${am45i.x} ${am45i.y} M ${pm45.x} ${pm45.y} L ${pm45i.x} ${pm45i.y}`
+  );
+
+  // Danger zone: arc segment between the two 45deg points (the top portion)
+  const dangerD = `M ${am45.x} ${am45.y} A ${r} ${r} 0 0 1 ${pm45.x} ${pm45.y} A ${r-16} ${r-16} 0 0 0 ${am45i.x} ${am45i.y} Z`;
+  document.getElementById('dangerZone').setAttribute('d',
+    `M ${am45.x} ${am45.y} A ${r} ${r} 0 0 1 ${pm45.x} ${pm45.y} L ${pm45i.x} ${pm45i.y} A ${r-16} ${r-16} 0 0 0 ${am45i.x} ${am45i.y} Z`
+  );
+
+  // Position 45deg labels just outside the markers
+  const am45l = ptOnArcInner(135, -18);
+  const pm45l = ptOnArcInner(45, -18);
+  const lbl1 = document.getElementById('lbl45am');
+  const lbl2 = document.getElementById('lbl45pm');
+  lbl1.setAttribute('x', am45l.x); lbl1.setAttribute('y', am45l.y + 4); lbl1.textContent = '45°';
+  lbl2.setAttribute('x', pm45l.x); lbl2.setAttribute('y', pm45l.y + 4); lbl2.textContent = '45°';
+
+  // Store for updateDial
+  window._dialCx = cx; window._dialCy = cy; window._dialR = r;
 }
 
 function updateDial(altitude) {
-  const cx = 130, cy = 130, r = 104;
-  const clampedAlt = Math.max(0, Math.min(90, altitude));
+  const cx = window._dialCx || 130;
+  const cy = window._dialCy || 160;
+  const r  = window._dialR  || 110;
 
-  // Arc spans 180deg: left horizon (180deg) over top (90deg... mapped to 270 in SVG coords... 
-  // we use: left=210, top=270(bottom of SVG = peak), right=330
-  // Sun travels: 210 (sunrise) -> 270 (noon, peak) -> 330 (sunset)
-  // Altitude maps to arc position via hour angle from solar noon
+  // Map altitude + time-of-day to angle on the upper semicircle
+  // Arc goes from 180deg (left/sunrise) counter-clockwise to 0deg (right/sunset)
+  // via 90deg (top/noon). So: angle = 180 - (progress * 180)
+  // Progress 0=sunrise, 0.5=noon, 1=sunset
+  // We derive progress from current time vs solar noon
   const now = new Date();
-  const pos = sunPosition(now, lat, lon);
-  const solarNoonHr = pos.solarNoonLocal;
+  const posNow = sunPosition(now, lat, lon);
+  const solarNoonHr = posNow.solarNoonLocal;
   const currentHr = now.getHours() + now.getMinutes()/60 + now.getSeconds()/3600;
-  const isPastNoon = currentHr > solarNoonHr;
 
-  // Map: altitude 0→90 maps to arc offset 0→60deg from each horizon end
-  // Morning: 210 + (alt/90)*60  gives 210 (horizon) to 270 (noon)
-  // Afternoon: 270 + (1-alt/90)*60 gives 270 (noon) to 330 (horizon)
-  let sunArcDeg;
-  if (!isPastNoon) {
-    sunArcDeg = 210 + (clampedAlt / 90) * 60;
-  } else {
-    sunArcDeg = 270 + (1 - clampedAlt / 90) * 60;
-  }
+  // Estimate sunrise/sunset hours from solar noon ± half-day
+  // Use stored values if available, else estimate
+  const sunriseHr = window._sunriseHr || (solarNoonHr - 6);
+  const sunsetHr  = window._sunsetHr  || (solarNoonHr + 6);
+  const dayLen = sunsetHr - sunriseHr;
+  const progress = Math.max(0, Math.min(1, (currentHr - sunriseHr) / dayLen));
 
-  // Fill arc always goes from sunrise point to current sun position
-  const startDeg = 210;
-  document.getElementById('dialFill').setAttribute('d', arcPath(cx, cy, r, startDeg, sunArcDeg));
+  // Angle on arc: 180deg at sunrise, 90deg at noon, 0deg at sunset
+  const sunAngleDeg = 180 - progress * 180;
+  const sunRad = toRad(sunAngleDeg);
+  const sunX = cx + r * Math.cos(sunRad);
+  const sunY = cy + r * Math.sin(sunRad);
+
+  // Traveled arc: from left (180deg) to current position
+  const travelD = `M ${cx - r} ${cy} A ${r} ${r} 0 ${progress > 0.5 ? 1 : 0} 1 ${sunX} ${sunY}`;
+  document.getElementById('dialFill').setAttribute('d', altitude > 0 ? travelD : '');
 
   // Sun dot
-  const dot = document.getElementById('sunDot');
-  if (altitude > -2) {
-    const sunX = cx + r * Math.cos(toRad(sunArcDeg));
-    const sunY = cy + r * Math.sin(toRad(sunArcDeg));
-    dot.setAttribute('cx', sunX);
-    dot.setAttribute('cy', sunY);
-    dot.setAttribute('opacity', altitude > 0 ? 1 : 0.3);
+  const dot  = document.getElementById('sunDot');
+  const glow = document.getElementById('sunDotGlow');
+  if (altitude > 0) {
+    dot.setAttribute('cx', sunX);  dot.setAttribute('cy', sunY);  dot.setAttribute('opacity', 1);
+    glow.setAttribute('cx', sunX); glow.setAttribute('cy', sunY); glow.setAttribute('opacity', 1);
   } else {
     dot.setAttribute('opacity', 0);
+    glow.setAttribute('opacity', 0);
   }
 
-  // Color
-  let color = '#6366f1';
-  if (altitude >= 45) color = '#ea580c';
+  // Color based on altitude
+  let color = '#a78bfa';
+  if (altitude >= 45)      color = '#ea580c';
   else if (altitude >= 30) color = '#f59e0b';
-  else if (altitude > 0) color = '#a78bfa';
+  else if (altitude > 0)   color = '#6366f1';
   document.getElementById('dialFill').style.stroke = color;
-  dot.style.fill = color;
+  dot.style.fill  = color;
+  glow.style.fill = color.replace(')', ',0.25)').replace('rgb', 'rgba');
 }
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
@@ -752,6 +801,9 @@ function computeDay() {
 
   window._rise45 = rise45;
   window._set45 = set45;
+  // Store sunrise/sunset as fractional UTC hours for dial progress
+  if (sunrise) window._sunriseHr = sunrise.getUTCHours() + sunrise.getUTCMinutes()/60;
+  if (sunset)  window._sunsetHr  = sunset.getUTCHours()  + sunset.getUTCMinutes()/60;
 
   // Cards
   document.getElementById('riseTime').textContent = fmt(rise45);
